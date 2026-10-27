@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="gl" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesla Model Y - Analizador de Viaxes Tessie</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        tesla: {
+                            red: '#E82127',
+                            darkred: '#B71C1C',
+                            dark: '#0B0F17',
+                            card: '#151C28',
+                            border: '#2A3447'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PapaParse para ler CSVs complexos e con calquera delimitador (coma, punto e coma, tab) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0B0F17; }
+        ::-webkit-scrollbar-thumb { background: #2A3447; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #E82127; }
+    </style>
+</head>
+<body class="bg-tesla-dark text-slate-100 min-h-screen flex flex-col antialiased">
+
+    <!-- Navbar -->
+    <header class="bg-tesla-card border-b border-tesla-border sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-tesla-red p-2 rounded-lg text-white">
+                    <i data-lucide="car" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight">Tesla Model Y</h1>
+                    <p class="text-xs text-slate-400">Análise de Conducción e Viaxes (Tessie)</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <!-- Selector de Ano -->
+                <div id="yearSelectorContainer" class="hidden flex items-center space-x-2 bg-tesla-dark px-3 py-1.5 rounded-lg border border-tesla-border">
+                    <i data-lucide="calendar" class="w-4 h-4 text-tesla-red"></i>
+                    <label for="yearFilter" class="text-xs font-medium text-slate-300">Ano:</label>
+                    <select id="yearFilter" class="bg-transparent text-sm font-semibold text-white focus:outline-none cursor-pointer">
+                        <option value="ALL">Tódolos anos</option>
+                    </select>
+                </div>
+
+                <!-- Botón Cargar Novo CSV -->
+                <label class="cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm px-3 py-2 rounded-lg border border-tesla-border transition flex items-center space-x-2">
+                    <i data-lucide="upload" class="w-4 h-4 text-tesla-red"></i>
+                    <span class="hidden sm:inline">Cargar outro CSV</span>
+                    <input type="file" id="csvFileInput" accept=".csv" class="hidden">
+                </label>
+            </div>
+        </div>
+    </header>
+
+    <!-- Notificación / Banner de erro ou aviso (sen alertas JS) -->
+    <div id="toastNotification" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+        <div id="toastContent" class="p-4 rounded-xl flex items-start justify-between border"></div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+        <!-- Initial Load / Upload Screen -->
+        <div id="uploadScreen" class="flex flex-col items-center justify-center py-16 px-4">
+            <div class="bg-tesla-card p-8 rounded-2xl border border-tesla-border max-w-lg w-full text-center shadow-2xl relative overflow-hidden">
+                <div class="absolute -top-10 -right-10 w-32 h-32 bg-tesla-red opacity-10 rounded-full blur-2xl"></div>
+                <div class="mx-auto w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center text-tesla-red mb-4 border border-tesla-border">
+                    <i data-lucide="file-spread-sheet" class="w-8 h-8"></i>
+                </div>
+                <h2 class="text-2xl font-bold mb-2">Carga o teu ficheiro de datos</h2>
+                <p class="text-slate-400 text-sm mb-6">
+                    Buscando automaticamente <code class="bg-slate-800 text-tesla-red px-2 py-0.5 rounded text-xs font-mono">Tessie-Viaxes.csv</code>. Se estás abrindo o ficheiro directamente no navegador ou non se atopou, selecciona o teu CSV manualmente.
+                </p>
+                <label class="cursor-pointer inline-flex items-center justify-center space-x-2 bg-tesla-red hover:bg-red-700 text-white font-medium px-6 py-3 rounded-xl transition shadow-lg shadow-tesla-red/20 w-full">
+                    <i data-lucide="folder-open" class="w-5 h-5"></i>
+                    <span>Seleccionar ficheiro CSV</span>
+                    <input type="file" id="manualCsvFileInput" accept=".csv" class="hidden">
+                </label>
+            </div>
+        </div>
+
+        <!-- Dashboard View (Oculto ao inicio ata cargar datos) -->
+        <div id="dashboardView" class="hidden space-y-6">
+
+            <!-- KPI Cards Grid Top -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- Total Viaxes -->
+                <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border shadow-sm">
+                    <div class="flex items-center justify-between text-slate-400 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Total Viaxes</span>
+                        <i data-lucide="route" class="w-5 h-5 text-tesla-red"></i>
+                    </div>
+                    <div class="text-3xl font-extrabold" id="kpiTotalTrips">0</div>
+                    <p class="text-xs text-slate-400 mt-1" id="kpiTotalTripsSub">En <span id="kpiTotalDays">0</span> días rexistrados</p>
+                </div>
+
+                <!-- Total Quilómetros -->
+                <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border shadow-sm">
+                    <div class="flex items-center justify-between text-slate-400 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Total Distancia</span>
+                        <i data-lucide="navigation" class="w-5 h-5 text-tesla-red"></i>
+                    </div>
+                    <div class="text-3xl font-extrabold"><span id="kpiTotalKm">0</span> <span class="text-lg font-normal text-slate-400">km</span></div>
+                    <p class="text-xs text-slate-400 mt-1">Vel. Máxima: <span id="kpiMaxSpeed" class="font-semibold text-slate-200">0</span> km/h</p>
+                </div>
+
+                <!-- Consumo Enerxía -->
+                <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border shadow-sm">
+                    <div class="flex items-center justify-between text-slate-400 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Enerxía Usada</span>
+                        <i data-lucide="zap" class="w-5 h-5 text-tesla-red"></i>
+                    </div>
+                    <div class="text-3xl font-extrabold"><span id="kpiTotalKwh">0</span> <span class="text-lg font-normal text-slate-400">kWh</span></div>
+                    <p class="text-xs text-slate-400 mt-1">Eficiencia: <span id="kpiAvgEfficiency" class="font-semibold text-slate-200">0</span> Wh/km</p>
+                </div>
+
+                <!-- Días sen conducir -->
+                <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border shadow-sm">
+                    <div class="flex items-center justify-between text-slate-400 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Días Sen Conducir</span>
+                        <i data-lucide="coffee" class="w-5 h-5 text-tesla-red"></i>
+                    </div>
+                    <div class="text-3xl font-extrabold"><span id="kpiZeroDays">0</span> <span class="text-lg font-normal text-slate-400">días</span></div>
+                    <p class="text-xs text-slate-400 mt-1">Sen actividade de conducción</p>
+                </div>
+            </div>
+
+            <!-- Extended Key Metrics Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- Día con máis conduccións -->
+                <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border">
+                    <div class="flex items-center space-x-2 text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                        <i data-lucide="award" class="w-4 h-4 text-tesla-red"></i>
+                        <span>Máis Conduccións (1 día)</span>
+                    </div>
+                    <div class="text-2xl font-bold text-slate-100" id="kpiMaxTripsDayValue">0 viaxes</div>
+                    <div class="text-xs text-tesla-red mt-1 font-medium" id="kpiMaxTripsDayDate">--</div>
+                </div>
+
+                <!-- Día con máis km -->
+                <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border">
+                    <div class="flex items-center space-x-2 text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                        <i data-lucide="map-pin" class="w-4 h-4 text-tesla-red"></i>
+                        <span>Máis Quilómetros (1 día)</span>
+                    </div>
+                    <div class="text-2xl font-bold text-slate-100" id="kpiMaxKmDayValue">0 km</div>
+                    <div class="text-xs text-tesla-red mt-1 font-medium" id="kpiMaxKmDayDate">--</div>
+                </div>
+
+                <!-- Consumo medio diario batería (Global) -->
+                <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border">
+                    <div class="flex items-center space-x-2 text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                        <i data-lucide="battery-charging" class="w-4 h-4 text-tesla-red"></i>
+                        <span>Consumo Medio Diario</span>
+                    </div>
+                    <div class="text-2xl font-bold text-slate-100"><span id="kpiAvgBatteryDaily">0</span>%</div>
+                    <div class="text-xs text-slate-400 mt-1">Porcentaxe de batería / día activo</div>
+                </div>
+
+                <!-- Consumo medio diario (< 60% consumo) -->
+                <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border">
+                    <div class="flex items-center space-x-2 text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                        <i data-lucide="shield-check" class="w-4 h-4 text-tesla-red"></i>
+                        <span>Consumo Habitual (&lt;60%)</span>
+                    </div>
+                    <div class="text-2xl font-bold text-slate-100"><span id="kpiAvgBatteryNormal">0</span>%</div>
+                    <div class="text-xs text-slate-400 mt-1">Excluíndo viaxes longas (&gt;60%/día)</div>
+                </div>
+            </div>
+
+            <!-- Charts Section -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Monthly Distance Chart -->
+                <div class="lg:col-span-2 bg-tesla-card p-5 rounded-2xl border border-tesla-border flex flex-col justify-between">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-bold text-base flex items-center space-x-2">
+                            <i data-lucide="bar-chart-3" class="w-5 h-5 text-tesla-red"></i>
+                            <span>Quilometraxe Mensual</span>
+                        </h3>
+                    </div>
+                    <div class="h-72 relative w-full">
+                        <canvas id="monthlyChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Battery Usage Distribution Chart -->
+                <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border flex flex-col justify-between">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-bold text-base flex items-center space-x-2">
+                            <i data-lucide="pie-chart" class="w-5 h-5 text-tesla-red"></i>
+                            <span>Rangos de Consumo Batería</span>
+                        </h3>
+                    </div>
+                    <div class="h-72 relative w-full flex items-center justify-center">
+                        <canvas id="batteryChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Consumo medio diario de batería por ano, só días ata o 60% -->
+            <div class="bg-tesla-card p-5 rounded-2xl border border-tesla-border">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 class="font-bold text-base flex items-center space-x-2">
+                            <i data-lucide="battery-charging" class="w-5 h-5 text-tesla-red"></i>
+                            <span>Consumo medio diario de batería por ano (días ata o 60%)</span>
+                        </h3>
+                        <p class="text-xs text-slate-400 mt-1">Cada barra representa a media do consumo total diario de batería dese ano. Só se inclúen días cun consumo total igual ou inferior ao 60%; móstranse todos os anos para poder comparalos.</p>
+                    </div>
+                </div>
+                <div class="h-80 relative w-full">
+                    <canvas id="dailyBatteryChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Top Frequented Routes Table -->
+            <div class="bg-tesla-card rounded-2xl border border-tesla-border overflow-hidden">
+                <div class="p-5 border-b border-tesla-border flex items-center justify-between">
+                    <div>
+                        <h3 class="font-bold text-base flex items-center space-x-2">
+                            <i data-lucide="arrow-right-left" class="w-5 h-5 text-tesla-red"></i>
+                            <span>Top Rutas Máis Frecuentes</span>
+                        </h3>
+                        <p class="text-xs text-slate-400 mt-0.5">Fai clic sobre calquera ruta para ver a listaxe completa e paxinada de viaxes</p>
+                    </div>
+                    <span class="text-xs bg-slate-800 text-slate-300 px-3 py-1 rounded-full border border-tesla-border" id="topRoutesCount">0 rutas</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-900/60 text-slate-400 text-xs uppercase tracking-wider border-b border-tesla-border">
+                            <tr>
+                                <th class="py-3.5 px-6">Orixe ➔ Destino</th>
+                                <th class="py-3.5 px-4 text-center">Nº Viaxes</th>
+                                <th class="py-3.5 px-4 text-right">Distancia Media</th>
+                                <th class="py-3.5 px-4 text-right">Duración Media</th>
+                                <th class="py-3.5 px-4 text-right">Consumo Medio</th>
+                                <th class="py-3.5 px-6 text-center">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="routesTableBody" class="divide-y divide-tesla-border/50 text-slate-200 font-medium">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Modal para detalle paxinado de viaxes de cada ruta -->
+    <div id="routeModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-tesla-card border border-tesla-border rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <!-- Modal Header -->
+            <div class="p-6 border-b border-tesla-border flex items-center justify-between bg-slate-900/50">
+                <div>
+                    <span class="text-xs text-tesla-red font-semibold uppercase tracking-wider">Histórico de Ruta</span>
+                    <h3 class="text-xl font-bold text-white mt-0.5" id="modalRouteTitle">Orixe ➔ Destino</h3>
+                </div>
+                <button id="closeModalBtn" class="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+
+            <!-- Modal Content (Table) -->
+            <div class="p-6 overflow-y-auto flex-grow">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-900 text-slate-400 text-xs uppercase border-b border-tesla-border">
+                            <tr>
+                                <th class="py-3 px-4">Data e Hora</th>
+                                <th class="py-3 px-4 text-right">Duración</th>
+                                <th class="py-3 px-4 text-right">Distancia</th>
+                                <th class="py-3 px-4 text-right">Vel. Media</th>
+                                <th class="py-3 px-4 text-right">Batería Usada</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalTripsTableBody" class="divide-y divide-tesla-border/40 text-slate-200">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Modal Footer / Pagination -->
+            <div class="p-4 border-t border-tesla-border bg-slate-900/50 flex items-center justify-between text-sm">
+                <div class="text-slate-400 text-xs">
+                    Amosando <span id="modalPageStart" class="text-slate-200 font-bold">0</span> - <span id="modalPageEnd" class="text-slate-200 font-bold">0</span> de <span id="modalTotalTrips" class="text-slate-200 font-bold">0</span> viaxes
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button id="prevPageBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1 border border-tesla-border">
+                        <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                        <span>Anterior</span>
+                    </button>
+                    <span id="modalPageIndicator" class="text-xs font-semibold px-2 text-slate-300">Páxina 1 / 1</span>
+                    <button id="nextPageBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1 border border-tesla-border">
+                        <span>Seguinte</span>
+                        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Principal Logic -->
+    <script>
+        // State Global
+        let rawTrips = [];
+        let filteredTrips = [];
+        let currentYear = 'ALL';
+        let monthlyChartInstance = null;
+        let batteryChartInstance = null;
+        let dailyBatteryChartInstance = null;
+
+        // Modal State
+        let currentModalRouteKey = null;
+        let modalTripsList = [];
+        let modalCurrentPage = 1;
+        const MODAL_PAGE_SIZE = 10;
+
+        // Inicializar iconas ao cargar
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            setupEventListeners();
+            attemptAutoFetch();
+        });
+
+        function setupEventListeners() {
+            document.getElementById('manualCsvFileInput').addEventListener('change', handleFileSelect);
+            document.getElementById('csvFileInput').addEventListener('change', handleFileSelect);
+            document.getElementById('yearFilter').addEventListener('change', (e) => {
+                currentYear = e.target.value;
+                applyFilterAndUpdate();
+            });
+
+            // Modal listeners
+            document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+            document.getElementById('routeModal').addEventListener('click', (e) => {
+                if (e.target.id === 'routeModal') closeModal();
+            });
+            document.getElementById('prevPageBtn').addEventListener('click', () => {
+                if (modalCurrentPage > 1) {
+                    modalCurrentPage--;
+                    renderModalPage();
+                }
+            });
+            document.getElementById('nextPageBtn').addEventListener('click', () => {
+                const maxPage = Math.ceil(modalTripsList.length / MODAL_PAGE_SIZE);
+                if (modalCurrentPage < maxPage) {
+                    modalCurrentPage++;
+                    renderModalPage();
+                }
+            });
+        }
+
+        // Tenta cargar automáticamente o ficheiro local Tessie-Viaxes.csv
+        function attemptAutoFetch() {
+            fetch('Tessie-Viaxes.csv')
+                .then(response => {
+                    if (!response.ok) throw new Error('Non se atopou Tessie-Viaxes.csv no directorio local');
+                    return response.text();
+                })
+                .then(csvText => {
+                    parseCSV(csvText);
+                })
+                .catch(err => {
+                    // Se falla silenciosamente (ex. por protocolo file:/// ou ficheiro ausente), amosamos a pantalla de carga manual sen alert()
+                    console.info('Auto-fetch non dispoñible ou file:// restrictivo. Amosando carga manual.', err);
+                    document.getElementById('uploadScreen').classList.remove('hidden');
+                });
+        }
+
+        // Carga por selección manual de ficheiro
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                dynamicTyping: false,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processParsedData(results.data);
+                    } else {
+                        showToast('O ficheiro CSV seleccionado parece estar baleiro ou con formato incorrecto.', 'error');
+                    }
+                },
+                error: function(err) {
+                    showToast('Erro ao ler o ficheiro CSV: ' + err.message, 'error');
+                }
+            });
+        }
+
+        function parseCSV(csvText) {
+            Papa.parse(csvText, {
+                header: true,
+                skipEmptyLines: true,
+                dynamicTyping: false,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processParsedData(results.data);
+                    } else {
+                        showToast('Non se puideron extraer datos do ficheiro Tessie-Viaxes.csv.', 'warning');
+                        document.getElementById('uploadScreen').classList.remove('hidden');
+                    }
+                },
+                error: function(err) {
+                    showToast('Erro ao analizar o CSV: ' + err.message, 'warning');
+                    document.getElementById('uploadScreen').classList.remove('hidden');
+                }
+            });
+        }
+
+        // Mapeo flexible de columnas para soportar calquera versión de exportación de Tessie/Tesla
+        function getColumnValue(row, possibleNames, defaultValue = 0) {
+            for (let name of possibleNames) {
+                if (row[name] !== undefined && row[name] !== null && row[name] !== '') {
+                    return row[name];
+                }
+            }
+            return defaultValue;
+        }
+
+        function processParsedData(data) {
+            rawTrips = [];
+
+            data.forEach((row, index) => {
+                // Procurar data de inicio
+                const startDateStr = getColumnValue(row, ['Started At (CET)', 'Started At', 'Start Date', 'Date', 'started_at'], null);
+                if (!startDateStr) return;
+
+                const startDate = new Date(startDateStr);
+                if (isNaN(startDate.getTime())) return;
+
+                // Extraer valores numéricos con limpeza
+                const distance = parseFloat(String(getColumnValue(row, ['Distance (km)', 'Distance', 'distance_km', 'distance'], 0)).replace(',', '.')) || 0;
+                const durationMinutes = parseFloat(String(getColumnValue(row, ['Duration (min)', 'Duration', 'duration_min', 'duration'], 0)).replace(',', '.')) || 0;
+                const startBattery = parseFloat(String(getColumnValue(row, ['Starting Battery (%)', 'Starting Battery', 'start_battery'], 0)).replace(',', '.')) || 0;
+                const endBattery = parseFloat(String(getColumnValue(row, ['Ending Battery (%)', 'Ending Battery', 'end_battery'], 0)).replace(',', '.')) || 0;
+                const energyUsedKwh = parseFloat(String(getColumnValue(row, ['Energy Used (kWh)', 'Energy Used', 'kwh_used'], 0)).replace(',', '.')) || 0;
+                const maxSpeed = parseFloat(String(getColumnValue(row, ['Max Speed (km/h)', 'Max Speed', 'max_speed'], 0)).replace(',', '.')) || 0;
+                const avgSpeed = parseFloat(String(getColumnValue(row, ['Avg Speed (km/h)', 'Avg Speed', 'avg_speed'], 0)).replace(',', '.')) || 0;
+
+                // Orixe e destino: priorizar o nome gardado en Tessie (Casa, Traballo, Piscina...)
+                // Se non hai nome gardado, usar a localización/dirección como alternativa.
+                const savedOrigin = String(getColumnValue(row, ['Starting Saved Location', 'Start Saved Location', 'Saved Starting Location'], '')).trim();
+                const savedDestination = String(getColumnValue(row, ['Ending Saved Location', 'End Saved Location', 'Saved Ending Location'], '')).trim();
+
+                let origin = savedOrigin || String(getColumnValue(row, ['Starting Location', 'Start Location', 'Origin', 'start_address'], 'Descoñecido')).trim();
+                let destination = savedDestination || String(getColumnValue(row, ['Ending Location', 'End Location', 'Destination', 'end_address'], 'Descoñecido')).trim();
+
+                // Recortar as direccións só cando non existe un nome gardado.
+                if (!savedOrigin) origin = origin.split(',')[0];
+                if (!savedDestination) destination = destination.split(',')[0];
+
+                const batteryUsed = Math.max(0, startBattery - endBattery);
+
+                rawTrips.push({
+                    id: index,
+                    date: startDate,
+                    year: startDate.getFullYear(),
+                    monthKey: `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`,
+                    dateKey: startDate.toISOString().split('T')[0],
+                    distance: distance,
+                    duration: durationMinutes,
+                    startBattery: startBattery,
+                    endBattery: endBattery,
+                    batteryUsed: batteryUsed,
+                    energyKwh: energyUsedKwh,
+                    maxSpeed: maxSpeed,
+                    avgSpeed: avgSpeed,
+                    origin: origin,
+                    destination: destination,
+                    routeKey: `${origin} ➔ ${destination}`
+                });
+            });
+
+            if (rawTrips.length === 0) {
+                showToast('O CSV non contén datos de viaxe válidos ou recoñecibles.', 'error');
+                document.getElementById('uploadScreen').classList.remove('hidden');
+                return;
+            }
+
+            // Ocultar pantalla de carga e amosar dashboard
+            document.getElementById('uploadScreen').classList.add('hidden');
+            document.getElementById('dashboardView').classList.remove('hidden');
+            document.getElementById('yearSelectorContainer').classList.remove('hidden');
+
+            // Encher combo de anos
+            populateYearSelector();
+
+            // Aplicar filtro e actualizar dashboard
+            applyFilterAndUpdate();
+            showToast(`Cargadas correctamente ${rawTrips.length} viaxes!`, 'success');
+        }
+
+        function populateYearSelector() {
+            const years = [...new Set(rawTrips.map(t => t.year))].sort((a, b) => b - a);
+            const select = document.getElementById('yearFilter');
+            select.innerHTML = '<option value="ALL">Tódolos anos</option>';
+            years.forEach(y => {
+                const opt = document.createElement('option');
+                opt.value = y;
+                opt.textContent = y;
+                select.appendChild(opt);
+            });
+        }
+
+        function applyFilterAndUpdate() {
+            if (currentYear === 'ALL') {
+                filteredTrips = [...rawTrips];
+            } else {
+                const yearNum = parseInt(currentYear);
+                filteredTrips = rawTrips.filter(t => t.year === yearNum);
+            }
+
+            updateKPIs();
+            renderCharts();
+            renderTopRoutesTable();
+        }
+
+        function updateKPIs() {
+            const totalTrips = filteredTrips.length;
+            const totalKm = filteredTrips.reduce((acc, t) => acc + t.distance, 0);
+            const totalKwh = filteredTrips.reduce((acc, t) => acc + t.energyKwh, 0);
+            const maxSpeed = filteredTrips.length > 0 ? Math.max(...filteredTrips.map(t => t.maxSpeed)) : 0;
+            const avgEfficiency = totalKm > 0 ? Math.round((totalKwh * 1000) / totalKm) : 0;
+
+            document.getElementById('kpiTotalTrips').textContent = totalTrips.toLocaleString('gl-ES');
+            document.getElementById('kpiTotalKm').textContent = Math.round(totalKm).toLocaleString('gl-ES');
+            document.getElementById('kpiTotalKwh').textContent = Math.round(totalKwh).toLocaleString('gl-ES');
+            document.getElementById('kpiMaxSpeed').textContent = Math.round(maxSpeed);
+            document.getElementById('kpiAvgEfficiency').textContent = avgEfficiency;
+
+            // Agrupar viaxes por día de calendario (YYYY-MM-DD)
+            const tripsByDay = {};
+            filteredTrips.forEach(t => {
+                if (!tripsByDay[t.dateKey]) {
+                    tripsByDay[t.dateKey] = { count: 0, totalKm: 0, batteryUsed: 0 };
+                }
+                tripsByDay[t.dateKey].count++;
+                tripsByDay[t.dateKey].totalKm += t.distance;
+                tripsByDay[t.dateKey].batteryUsed += t.batteryUsed;
+            });
+
+            const activeDayKeys = Object.keys(tripsByDay);
+
+            // 1. Día con máis conduccións
+            let maxTripsDay = { date: '--', count: 0 };
+            // 2. Día con máis km
+            let maxKmDay = { date: '--', km: 0 };
+
+            activeDayKeys.forEach(dateStr => {
+                const dayData = tripsByDay[dateStr];
+                if (dayData.count > maxTripsDay.count) {
+                    maxTripsDay = { date: formatDate(dateStr), count: dayData.count };
+                }
+                if (dayData.totalKm > maxKmDay.km) {
+                    maxKmDay = { date: formatDate(dateStr), km: dayData.totalKm };
+                }
+            });
+
+            document.getElementById('kpiMaxTripsDayValue').textContent = `${maxTripsDay.count} viaxes`;
+            document.getElementById('kpiMaxTripsDayDate').textContent = maxTripsDay.date;
+
+            document.getElementById('kpiMaxKmDayValue').textContent = `${Math.round(maxKmDay.km)} km`;
+            document.getElementById('kpiMaxKmDayDate').textContent = maxKmDay.date;
+
+            // 3. Consumo medio diario batería (Global)
+            const totalBatteryDailySum = activeDayKeys.reduce((acc, dateKey) => acc + tripsByDay[dateKey].batteryUsed, 0);
+            const avgBatteryDaily = activeDayKeys.length > 0 ? (totalBatteryDailySum / activeDayKeys.length).toFixed(1) : 0;
+            document.getElementById('kpiAvgBatteryDaily').textContent = avgBatteryDaily;
+
+            // 4. Consumo medio diario días nos que non se supera o 60% consumo
+            const normalDays = activeDayKeys.filter(dateKey => tripsByDay[dateKey].batteryUsed <= 60);
+            const totalBatteryNormalSum = normalDays.reduce((acc, dateKey) => acc + tripsByDay[dateKey].batteryUsed, 0);
+            const avgBatteryNormal = normalDays.length > 0 ? (totalBatteryNormalSum / normalDays.length).toFixed(1) : 0;
+            document.getElementById('kpiAvgBatteryNormal').textContent = avgBatteryNormal;
+
+            // 5. Días sen conducir nada no período
+            let zeroDaysCount = 0;
+            if (filteredTrips.length > 0) {
+                const minDate = new Date(Math.min(...filteredTrips.map(t => t.date)));
+                const maxDate = new Date(Math.max(...filteredTrips.map(t => t.date)));
+                const totalPeriodDays = Math.floor((maxDate - minDate) / (1000 * 60 * 60 * 24)) + 1;
+                zeroDaysCount = Math.max(0, totalPeriodDays - activeDayKeys.length);
+                document.getElementById('kpiTotalDays').textContent = activeDayKeys.length;
+            } else {
+                document.getElementById('kpiTotalDays').textContent = 0;
+            }
+            document.getElementById('kpiZeroDays').textContent = zeroDaysCount.toLocaleString('gl-ES');
+        }
+
+        // Gráficos Chart.js
+        function renderCharts() {
+            // Chart 1: Quilometraxe Mensual
+            const monthlyData = {};
+            filteredTrips.forEach(t => {
+                monthlyData[t.monthKey] = (monthlyData[t.monthKey] || 0) + t.distance;
+            });
+
+            const sortedMonths = Object.keys(monthlyData).sort();
+            const monthLabels = sortedMonths.map(m => {
+                const [y, monthNum] = m.split('-');
+                const date = new Date(y, parseInt(monthNum) - 1, 1);
+                return date.toLocaleDateString('gl-ES', { month: 'short', year: '2-digit' });
+            });
+            const monthValues = sortedMonths.map(m => Math.round(monthlyData[m]));
+
+            const ctx1 = document.getElementById('monthlyChart').getContext('2d');
+            if (monthlyChartInstance) monthlyChartInstance.destroy();
+
+            monthlyChartInstance = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: monthLabels,
+                    datasets: [{
+                        label: 'Quilómetros',
+                        data: monthValues,
+                        backgroundColor: '#E82127',
+                        hoverBackgroundColor: '#B71C1C',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false, drawBorder: false },
+                            ticks: { color: '#94A3B8' }
+                        },
+                        y: {
+                            grid: { color: '#2A3447' },
+                            ticks: { color: '#94A3B8' }
+                        }
+                    }
+                }
+            });
+
+            // Chart 3: Consumo medio diario de batería por ano, só días cun gasto <= 60%.
+            // Usa rawTrips para que se poidan comparar todos os anos, independentemente do filtro de ano.
+            const dailyBatteryTotals = {};
+            rawTrips.forEach(t => {
+                dailyBatteryTotals[t.dateKey] = (dailyBatteryTotals[t.dateKey] || 0) + t.batteryUsed;
+            });
+
+            const yearlyBatteryStats = {};
+            Object.entries(dailyBatteryTotals).forEach(([dateKey, total]) => {
+                if (total <= 60) {
+                    const year = dateKey.slice(0, 4);
+                    if (!yearlyBatteryStats[year]) yearlyBatteryStats[year] = { total: 0, days: 0 };
+                    yearlyBatteryStats[year].total += total;
+                    yearlyBatteryStats[year].days += 1;
+                }
+            });
+
+            const batteryYears = Object.keys(yearlyBatteryStats).sort();
+            const averageBatteryByYear = batteryYears.map(year =>
+                Number((yearlyBatteryStats[year].total / yearlyBatteryStats[year].days).toFixed(1))
+            );
+
+            const dailyBatteryCtx = document.getElementById('dailyBatteryChart').getContext('2d');
+            if (dailyBatteryChartInstance) dailyBatteryChartInstance.destroy();
+
+            dailyBatteryChartInstance = new Chart(dailyBatteryCtx, {
+                type: 'bar',
+                data: {
+                    labels: batteryYears,
+                    datasets: [{
+                        label: 'Consumo medio diario de batería',
+                        data: averageBatteryByYear,
+                        backgroundColor: '#E82127',
+                        hoverBackgroundColor: '#B71C1C',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: context => `Media diaria: ${context.parsed.y.toLocaleString('gl-ES', { maximumFractionDigits: 1 })}%`,
+                                afterLabel: context => `${yearlyBatteryStats[context.label].days} días incluídos`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false, drawBorder: false },
+                            ticks: { color: '#94A3B8' },
+                            title: { display: true, text: 'Ano', color: '#94A3B8' }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Consumo medio diario (%)', color: '#94A3B8' },
+                            grid: { color: '#2A3447' },
+                            ticks: { color: '#94A3B8', callback: value => `${value}%` }
+                        }
+                    }
+                }
+            });
+
+            // Chart 2: Distribución consumo batería por viaxe
+            const batteryRanges = {
+                '< 5%': 0,
+                '5% - 15%': 0,
+                '15% - 30%': 0,
+                '30% - 50%': 0,
+                '> 50%': 0
+            };
+
+            filteredTrips.forEach(t => {
+                const b = t.batteryUsed;
+                if (b < 5) batteryRanges['< 5%']++;
+                else if (b < 15) batteryRanges['5% - 15%']++;
+                else if (b < 30) batteryRanges['15% - 30%']++;
+                else if (b < 50) batteryRanges['30% - 50%']++;
+                else batteryRanges['> 50%']++;
+            });
+
+            const ctx2 = document.getElementById('batteryChart').getContext('2d');
+            if (batteryChartInstance) batteryChartInstance.destroy();
+
+            batteryChartInstance = new Chart(ctx2, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(batteryRanges),
+                    datasets: [{
+                        data: Object.values(batteryRanges),
+                        backgroundColor: ['#38BDF8', '#4ADE80', '#FACC15', '#FB923C', '#E82127'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: '#CBD5E1', boxWidth: 12, padding: 15 }
+                        }
+                    },
+                    cutout: '70%'
+                }
+            });
+        }
+
+        // Táboa de Rutas máis Frecuentes
+        function renderTopRoutesTable() {
+            const routesMap = {};
+
+            filteredTrips.forEach(t => {
+                if (!routesMap[t.routeKey]) {
+                    routesMap[t.routeKey] = {
+                        key: t.routeKey,
+                        origin: t.origin,
+                        destination: t.destination,
+                        count: 0,
+                        totalKm: 0,
+                        totalDuration: 0,
+                        totalBattery: 0
+                    };
+                }
+                routesMap[t.routeKey].count++;
+                routesMap[t.routeKey].totalKm += t.distance;
+                routesMap[t.routeKey].totalDuration += t.duration;
+                routesMap[t.routeKey].totalBattery += t.batteryUsed;
+            });
+
+            const sortedRoutes = Object.values(routesMap)
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 15); // Top 15 rutas
+
+            document.getElementById('topRoutesCount').textContent = `${sortedRoutes.length} rutas máis frecuentes`;
+            const tbody = document.getElementById('routesTableBody');
+            tbody.innerHTML = '';
+
+            if (sortedRoutes.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-500">Non hai rutas dispoñibles neste período.</td></tr>`;
+                return;
+            }
+
+            sortedRoutes.forEach(route => {
+                const avgKm = (route.totalKm / route.count).toFixed(1);
+                const avgMin = Math.round(route.totalDuration / route.count);
+                const avgBat = (route.totalBattery / route.count).toFixed(1);
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-800/60 cursor-pointer transition';
+                tr.innerHTML = `
+                    <td class="py-3.5 px-6 font-semibold text-white">
+                        <div class="flex items-center space-x-2">
+                            <span>${escapeHtml(route.origin)}</span>
+                            <i data-lucide="arrow-right" class="w-4 h-4 text-tesla-red inline flex-shrink-0"></i>
+                            <span>${escapeHtml(route.destination)}</span>
+                        </div>
+                    </td>
+                    <td class="py-3.5 px-4 text-center">
+                        <span class="bg-tesla-red/20 text-tesla-red font-bold px-2.5 py-1 rounded-full text-xs">
+                            ${route.count} viaxes
+                        </span>
+                    </td>
+                    <td class="py-3.5 px-4 text-right">${avgKm} km</td>
+                    <td class="py-3.5 px-4 text-right">${avgMin} min</td>
+                    <td class="py-3.5 px-4 text-right font-medium text-emerald-400">-${avgBat}%</td>
+                    <td class="py-3.5 px-6 text-center">
+                        <button class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-tesla-border flex items-center space-x-1 mx-auto">
+                            <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                            <span>Ver detalles</span>
+                        </button>
+                    </td>
+                `;
+
+                tr.addEventListener('click', () => openRouteModal(route.key));
+                tbody.appendChild(tr);
+            });
+
+            lucide.createIcons();
+        }
+
+        // Lóxica da Modal e Paxinación por Ruta
+        function openRouteModal(routeKey) {
+            currentModalRouteKey = routeKey;
+            
+            // Filtrar viaxes desta ruta e habelas ordenadas descendente por data (máis recente primeiro)
+            modalTripsList = filteredTrips
+                .filter(t => t.routeKey === routeKey)
+                .sort((a, b) => b.date - a.date);
+
+            modalCurrentPage = 1;
+            document.getElementById('modalRouteTitle').textContent = routeKey;
+            document.getElementById('routeModal').classList.remove('hidden');
+
+            renderModalPage();
+        }
+
+        function closeModal() {
+            document.getElementById('routeModal').classList.add('hidden');
+        }
+
+        function renderModalPage() {
+            const totalTrips = modalTripsList.length;
+            const maxPage = Math.ceil(totalTrips / MODAL_PAGE_SIZE) || 1;
+            
+            const startIdx = (modalCurrentPage - 1) * MODAL_PAGE_SIZE;
+            const endIdx = Math.min(startIdx + MODAL_PAGE_SIZE, totalTrips);
+            
+            const pageTrips = modalTripsList.slice(startIdx, endIdx);
+
+            const tbody = document.getElementById('modalTripsTableBody');
+            tbody.innerHTML = '';
+
+            if (pageTrips.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-slate-500">Sen viaxes para amosar.</td></tr>`;
+            } else {
+                pageTrips.forEach(t => {
+                    const dateFormatted = t.date.toLocaleString('gl-ES', {
+                        day: '2-digit', month: '2-digit', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit'
+                    });
+
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-slate-800/40';
+                    tr.innerHTML = `
+                        <td class="py-3 px-4 font-mono text-xs text-slate-300">${dateFormatted}</td>
+                        <td class="py-3 px-4 text-right">${Math.round(t.duration)} min</td>
+                        <td class="py-3 px-4 text-right font-medium">${t.distance.toFixed(1)} km</td>
+                        <td class="py-3 px-4 text-right text-slate-400">${Math.round(t.avgSpeed)} km/h</td>
+                        <td class="py-3 px-4 text-right font-semibold text-emerald-400">-${t.batteryUsed.toFixed(1)}%</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+
+            // Actualizar controis de paxinación
+            document.getElementById('modalPageStart').textContent = totalTrips > 0 ? startIdx + 1 : 0;
+            document.getElementById('modalPageEnd').textContent = endIdx;
+            document.getElementById('modalTotalTrips').textContent = totalTrips;
+            document.getElementById('modalPageIndicator').textContent = `Páxina ${modalCurrentPage} de ${maxPage}`;
+
+            document.getElementById('prevPageBtn').disabled = modalCurrentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = modalCurrentPage >= maxPage;
+
+            lucide.createIcons();
+        }
+
+        // Utilities
+        function formatDate(dateStr) {
+            const [y, m, d] = dateStr.split('-');
+            return `${d}/${m}/${y}`;
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/[&<>"']/g, function(m) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                }[m];
+            });
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toastNotification');
+            const content = document.getElementById('toastContent');
+            
+            let bgClasses = 'bg-slate-800 text-slate-200 border-tesla-border';
+            let iconName = 'info';
+
+            if (type === 'success') {
+                bgClasses = 'bg-emerald-950/80 text-emerald-200 border-emerald-800';
+                iconName = 'check-circle';
+            } else if (type === 'error') {
+                bgClasses = 'bg-rose-950/80 text-rose-200 border-rose-800';
+                iconName = 'alert-triangle';
+            } else if (type === 'warning') {
+                bgClasses = 'bg-amber-950/80 text-amber-200 border-amber-800';
+                iconName = 'alert-circle';
+            }
+
+            content.className = `p-4 rounded-xl flex items-center justify-between border ${bgClasses} shadow-lg`;
+            content.innerHTML = `
+                <div class="flex items-center space-x-3">
+                    <i data-lucide="${iconName}" class="w-5 h-5 flex-shrink-0"></i>
+                    <span class="text-sm font-medium">${escapeHtml(message)}</span>
+                </div>
+                <button onclick="document.getElementById('toastNotification').classList.add('hidden')" class="ml-4 opacity-70 hover:opacity-100">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            `;
+            
+            toast.classList.remove('hidden');
+            lucide.createIcons();
+
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 6000);
+        }
+    </script>
+</body>
+</html>
